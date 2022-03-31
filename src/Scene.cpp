@@ -95,14 +95,22 @@ void Mesh::drawCubes(ShaderProgram& shader) const {
 }
 
 void Scene::scale(glm::vec3 ratio) {
+    m_modelmat_modified_flag = true;
     m_modelmat = glm::scale(m_modelmat, ratio);
 }
 
 void Scene::translate(glm::vec3 pos) {
+    m_modelmat_modified_flag = true;
     m_modelmat = glm::translate(m_modelmat, pos);
 }
 
-glm::mat4 Scene::getModelMatrix() const { return m_modelmat; }
+glm::mat4 Scene::getNormalMatrix() {
+    if (m_modelmat_modified_flag) {
+        m_normalmat = glm::transpose(glm::inverse(m_modelmat));
+        m_modelmat_modified_flag = true;
+    }
+    return m_normalmat;
+}
 
 size_t Scene::countMesh() const { return m_meshes.size(); }
 

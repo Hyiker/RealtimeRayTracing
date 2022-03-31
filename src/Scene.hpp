@@ -64,11 +64,14 @@ struct Mesh {
 class Scene {
     std::vector<Mesh> m_meshes;
     glm::mat4 m_modelmat{1.0};
+    glm::mat4 m_normalmat{1.0};
+    bool m_modelmat_modified_flag{false};
 
    public:
     void scale(glm::vec3 ratio);
     void translate(glm::vec3 pos);
-    glm::mat4 getModelMatrix() const;
+    glm::mat4 getModelMatrix() const { return m_modelmat; };
+    glm::mat4 getNormalMatrix();
     size_t countMesh() const;
     size_t countVertex() const;
     void draw(ShaderProgram& sp) const;

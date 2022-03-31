@@ -18,24 +18,24 @@
 #include "Framebuffer.hpp"
 #include "Quad.hpp"
 #include "Shader.hpp"
-class MyApplication : public Application
-{
+class MyApplication : public Application {
     Scene m_scene;
+    // regular blinn-phong shader
+    ShaderProgram m_bp_shader;
     glm::vec3 m_sun_position;
-    bool m_sun_moved{true};
 
     Quad m_quad;
     Camera m_cam;
 
-public:
+   public:
     MyApplication(const std::string &path, int width = 640, int height = 480);
     Camera &getCamera() { return m_cam; }
 
-protected:
+   protected:
     void gui();
     virtual void loop();
 
-private:
+   private:
     void cameraMove();
     void sunMove();
 };

@@ -54,10 +54,10 @@ static void mouseCallback(GLFWwindow *window, double xposIn, double yposIn) {
 MyApplication::MyApplication(const string &path, int width, int height)
     : Application(width, height),
       m_scene(path),
-      m_sun_position(0, 10.0, 0),
-      m_cam(vec3(-0.65, 0.4, 0), glm::vec3(0.0f, 1.0f, 0.0f), -11.5, -9.2) {
-    m_scene.scale(vec3(0.01));
-
+      m_bp_shader{{SHADER_DIR "/blinnPhongShader.vert", GL_VERTEX_SHADER},
+                  {SHADER_DIR "/blinnPhongShader.frag", GL_FRAGMENT_SHADER}},
+      m_sun_position(-0.234011, 5.319334, -3.042968),
+      m_cam(vec3(0, 0, 4.5), glm::vec3(0.0f, 1.0f, 0.0f), -90.f, 0.f) {
     glfwSetWindowUserPointer(getWindow(), this);
     glfwSetCursorPosCallback(getWindow(), mouseCallback);
 }
@@ -79,9 +79,9 @@ void MyApplication::gui() {
     ImGui::Separator();
     ImGui::Text("Meshes: %lu, Vertices: %lu", m_scene.countMesh(),
                 m_scene.countVertex());
-    ImGui::Text("Camera Position: (%.1f, %.1f, %.1f)", m_cam.position.x,
-                m_cam.position.y, m_cam.position.z);
-    ImGui::Text("Camera Pitch: %.1f, Yaw: %.1f", m_cam.pitch, m_cam.yaw);
+    auto cam_pos = m_cam.getPosition();
+    ImGui::Text("Camera Position: (%.1f, %.1f, %.1f)", cam_pos.x, cam_pos.y,
+                cam_pos.z);
     ImGui::Text("Sun Position: (%.1f, %.1f, %.1f)", m_sun_position.x,
                 m_sun_position.y, m_sun_position.z);
 
@@ -97,40 +97,45 @@ void MyApplication::cameraMove() {
     if (glfwGetKey(getWindow(), GLFW_KEY_D) == GLFW_PRESS)
         m_cam.processKeyboard(CameraMovement::RIGHT, getFrameDeltaTime());
 }
-
 void MyApplication::sunMove() {
     if (glfwGetKey(getWindow(), GLFW_KEY_UP) == GLFW_PRESS) {
         m_sun_position.x -= 10.0 * getFrameDeltaTime();
-        m_sun_moved = true;
     }
     if (glfwGetKey(getWindow(), GLFW_KEY_DOWN) == GLFW_PRESS) {
         m_sun_position.x += 10.0 * getFrameDeltaTime();
-        m_sun_moved = true;
     }
     if (glfwGetKey(getWindow(), GLFW_KEY_LEFT) == GLFW_PRESS) {
         m_sun_position.z += 10.0 * getFrameDeltaTime();
-        m_sun_moved = true;
     }
     if (glfwGetKey(getWindow(), GLFW_KEY_RIGHT) == GLFW_PRESS) {
         m_sun_position.z -= 10.0 * getFrameDeltaTime();
-        m_sun_moved = true;
     }
 }
 void MyApplication::loop() {
     if (glfwWindowShouldClose(getWindow()) ||
         glfwGetKey(getWindow(), GLFW_KEY_ESCAPE) == GLFW_PRESS)
         exit();
-    bool light_rerendered_flag = false;
-    // input interact
+    // input
     cameraMove();
     sunMove();
 
-    glClear(GL_COLOR_BUFFER_BIT);
+    // rendering
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     glClearColor(RGB_DIV_255(135, 206, 235), 1.0);
+    checkError();
+
+    glEnable(GL_DEPTH_TEST);
+    m_bp_shader.use();
+    m_bp_shader.setUniform("uProjection", m_cam.getProjectionMatrix());
+    m_bp_shader.setUniform("uView", m_cam.getViewMatrix());
+    m_bp_shader.setUniform("uModel", m_scene.getModelMatrix());
+    m_bp_shader.setUniform("uNormalTransform", m_scene.getNormalMatrix());
+    m_bp_shader.setUniform("uCamPosition", m_cam.getPosition());
+    m_bp_shader.setUniform("uSunPosition", m_sun_position);
+
+    m_scene.draw(m_bp_shader);
     checkError();
 
     glBindVertexArray(0);
     gui();
-
-    if (light_rerendered_flag && m_sun_moved) m_sun_moved = false;
 }
