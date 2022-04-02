@@ -11,9 +11,12 @@
 #include <imgui.h>
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/random.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include <glm/matrix.hpp>
 #include <iostream>
+#include <map>
+#include <random>
 #include <vector>
 
 #include "Framebuffer.hpp"
@@ -49,17 +52,33 @@ static void mouseCallback(GLFWwindow *window, double xposIn, double yposIn) {
     lastX = xpos;
     lastY = ypos;
     myapp->getCamera().processMouseMovement(xoffset, yoffset);
+    myapp->resetRayTracer();
 }
 
-MyApplication::MyApplication(const string &path, int width, int height)
+MyApplication::MyApplication(int width, int height)
     : Application(width, height),
-      m_scene(path),
-      m_bp_shader{{SHADER_DIR "/blinnPhongShader.vert", GL_VERTEX_SHADER},
-                  {SHADER_DIR "/blinnPhongShader.frag", GL_FRAGMENT_SHADER}},
-      m_sun_position(-0.234011, 5.319334, -3.042968),
+      m_rtrt_shader{{SHADER_DIR "/rtrtShader.vert", GL_VERTEX_SHADER},
+                    {SHADER_DIR "/rtrtShader.frag", GL_FRAGMENT_SHADER}},
+      m_final_shader{{SHADER_DIR "/finalShader.vert", GL_VERTEX_SHADER},
+                     {SHADER_DIR "/finalShader.frag", GL_FRAGMENT_SHADER}},
       m_cam(vec3(0, 0, 4.5), glm::vec3(0.0f, 1.0f, 0.0f), -90.f, 0.f) {
     glfwSetWindowUserPointer(getWindow(), this);
     glfwSetCursorPosCallback(getWindow(), mouseCallback);
+
+    for (int i = 0; i < 2; i++) {
+        m_screen_texture[i].init();
+        m_screen_texture[i].setup(getFramebufferWidth(), getFramebufferHeight(),
+                                  GL_RGB, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+        m_screen_texture[i].setSizeFilter(GL_LINEAR, GL_LINEAR);
+    }
+    m_fbo.init();
+    m_fbo.attachTexture(m_screen_texture[0], GL_COLOR_ATTACHMENT0, 0);
+    m_fbo.attachTexture(m_screen_texture[1], GL_COLOR_ATTACHMENT1, 0);
+    m_fbo.bind();
+    GLuint attachments[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2, attachments);
+    checkError();
+    m_fbo.unbind();
 }
 void MyApplication::gui() {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -75,41 +94,55 @@ void MyApplication::gui() {
     ImGui::Text("Renderer: %s", renderer);
     ImGui::Text("OpenGL Version: %s", version);
 
-    // object information
+    // cam information
     ImGui::Separator();
-    ImGui::Text("Meshes: %lu, Vertices: %lu", m_scene.countMesh(),
-                m_scene.countVertex());
     auto cam_pos = m_cam.getPosition();
     ImGui::Text("Camera Position: (%.1f, %.1f, %.1f)", cam_pos.x, cam_pos.y,
                 cam_pos.z);
-    ImGui::Text("Sun Position: (%.1f, %.1f, %.1f)", m_sun_position.x,
-                m_sun_position.y, m_sun_position.z);
+
+    // raytracer settings
+    ImGui::Separator();
+    ImGui::Text(
+        "Press up/down arrow to adjust SPP, left/right arrow to adjust Max "
+        "Bounce");
+    ImGui::SliderInt("Samples per Pixel(SPP) per Frame", &m_light_samples, 1,
+                     4);
+    ImGui::SliderInt("Light Bounce", &m_light_bounce, 0, 200);
+    ImGui::Text("Current SPP: %lld", m_spp);
 
     ImGui::End();
 }
+static const map<int, CameraMovement> MOUSE_KEYMAP = {
+    {GLFW_KEY_W, CameraMovement::FORWARD},
+    {GLFW_KEY_S, CameraMovement::BACKWARD},
+    {GLFW_KEY_A, CameraMovement::LEFT},
+    {GLFW_KEY_D, CameraMovement::RIGHT},
+};
 void MyApplication::cameraMove() {
-    if (glfwGetKey(getWindow(), GLFW_KEY_W) == GLFW_PRESS)
-        m_cam.processKeyboard(CameraMovement::FORWARD, getFrameDeltaTime());
-    if (glfwGetKey(getWindow(), GLFW_KEY_S) == GLFW_PRESS)
-        m_cam.processKeyboard(CameraMovement::BACKWARD, getFrameDeltaTime());
-    if (glfwGetKey(getWindow(), GLFW_KEY_A) == GLFW_PRESS)
-        m_cam.processKeyboard(CameraMovement::LEFT, getFrameDeltaTime());
-    if (glfwGetKey(getWindow(), GLFW_KEY_D) == GLFW_PRESS)
-        m_cam.processKeyboard(CameraMovement::RIGHT, getFrameDeltaTime());
+    for (auto const &[k, v] : MOUSE_KEYMAP) {
+        if (glfwGetKey(getWindow(), k) == GLFW_PRESS) {
+            m_cam.processKeyboard(v, getFrameDeltaTime());
+            resetRayTracer();
+        }
+    }
 }
-void MyApplication::sunMove() {
-    if (glfwGetKey(getWindow(), GLFW_KEY_UP) == GLFW_PRESS) {
-        m_sun_position.x -= 10.0 * getFrameDeltaTime();
-    }
-    if (glfwGetKey(getWindow(), GLFW_KEY_DOWN) == GLFW_PRESS) {
-        m_sun_position.x += 10.0 * getFrameDeltaTime();
-    }
-    if (glfwGetKey(getWindow(), GLFW_KEY_LEFT) == GLFW_PRESS) {
-        m_sun_position.z += 10.0 * getFrameDeltaTime();
-    }
-    if (glfwGetKey(getWindow(), GLFW_KEY_RIGHT) == GLFW_PRESS) {
-        m_sun_position.z -= 10.0 * getFrameDeltaTime();
-    }
+
+void MyApplication::lightParamAjust() {
+    if (glfwGetKey(getWindow(), GLFW_KEY_UP) == GLFW_PRESS)
+        m_light_samples = std::min(m_light_samples + 1, 4);
+    if (glfwGetKey(getWindow(), GLFW_KEY_DOWN) == GLFW_PRESS)
+        m_light_samples = std::max(m_light_samples - 1, 0);
+
+    if (glfwGetKey(getWindow(), GLFW_KEY_LEFT) == GLFW_PRESS)
+        m_light_bounce = std::max(m_light_bounce - 1, 0);
+    if (glfwGetKey(getWindow(), GLFW_KEY_RIGHT) == GLFW_PRESS)
+        m_light_bounce = std::min(m_light_bounce + 1, 200);
+}
+static glm::vec3 randomVec3() {
+    std::random_device rd;
+    std::default_random_engine eng(rd());
+    std::uniform_real_distribution<> distr(0.0, 1.0);
+    return vec3(distr(eng), distr(eng), distr(eng));
 }
 void MyApplication::loop() {
     if (glfwWindowShouldClose(getWindow()) ||
@@ -117,25 +150,47 @@ void MyApplication::loop() {
         exit();
     // input
     cameraMove();
-    sunMove();
+    lightParamAjust();
 
     // rendering
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-    glClearColor(RGB_DIV_255(135, 206, 235), 1.0);
     checkError();
+    static int pingpong = 0;
 
-    glEnable(GL_DEPTH_TEST);
-    m_bp_shader.use();
-    m_bp_shader.setUniform("uProjection", m_cam.getProjectionMatrix());
-    m_bp_shader.setUniform("uView", m_cam.getViewMatrix());
-    m_bp_shader.setUniform("uModel", m_scene.getModelMatrix());
-    m_bp_shader.setUniform("uNormalTransform", m_scene.getNormalMatrix());
-    m_bp_shader.setUniform("uCamPosition", m_cam.getPosition());
-    m_bp_shader.setUniform("uSunPosition", m_sun_position);
+    m_fbo.bind();
+    glDisable(GL_DEPTH_TEST);
+    if (m_cam_move_flag) {
+        glClear(GL_COLOR_BUFFER_BIT);
+        glClearColor(GL_RGBA_BLACK);
+        m_cam_move_flag = false;
+    }
 
-    m_scene.draw(m_bp_shader);
+    m_rtrt_shader.use();
+    m_rtrt_shader.setUniform("uCamera.position", m_cam.getPosition());
+    m_rtrt_shader.setUniform("uCamera.fov", m_cam.getFov());
+    m_rtrt_shader.setUniform("uCamera.aspectRatio", m_cam.getAspectRatio());
+    m_rtrt_shader.setUniform("uCamera.front", m_cam.getFront());
+    m_rtrt_shader.setUniform("uCamera.up", m_cam.getUp());
+    m_rtrt_shader.setUniform("uLightBounceCount", m_light_bounce);
+    m_rtrt_shader.setUniform("uLightSamples", m_light_samples);
+    m_rtrt_shader.setUniform("uFramebufferSize", vec2(getFramebufferWidth(),
+                                                      getFramebufferHeight()));
+    m_rtrt_shader.setTexture("uLastFrame", 0, m_screen_texture[pingpong]);
+    m_rtrt_shader.setUniform("uPingpong", pingpong ^ 1);
+
+    m_rtrt_shader.setUniform("uRand3", randomVec3());
+    m_spp += m_light_samples;
+    m_quad.draw();
+
+    m_fbo.unbind();
+    glDisable(GL_DEPTH_TEST);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glClearColor(GL_RGBA_BLACK);
+    m_final_shader.use();
+    m_final_shader.setTexture("uRenderTexture", 0,
+                              m_screen_texture[pingpong ^ 1]);
+    m_quad.draw();
     checkError();
-
+    pingpong = pingpong ^ 1;
     glBindVertexArray(0);
     gui();
 }

@@ -19,17 +19,25 @@
 #include "Quad.hpp"
 #include "Shader.hpp"
 class MyApplication : public Application {
-    Scene m_scene;
-    // regular blinn-phong shader
-    ShaderProgram m_bp_shader;
-    glm::vec3 m_sun_position;
+    ShaderProgram m_rtrt_shader;
+    ShaderProgram m_final_shader;
+
+    Framebuffer m_fbo;
+    Texture m_screen_texture[2];
 
     Quad m_quad;
     Camera m_cam;
+    int m_light_bounce{90}, m_light_samples{1};
+    long long m_spp{0};
+    bool m_cam_move_flag{false};
 
    public:
-    MyApplication(const std::string &path, int width = 640, int height = 480);
+    MyApplication(int width = 640, int height = 480);
     Camera &getCamera() { return m_cam; }
+    void resetRayTracer() {
+        m_spp = 0;
+        m_cam_move_flag = true;
+    }
 
    protected:
     void gui();
@@ -37,7 +45,7 @@ class MyApplication : public Application {
 
    private:
     void cameraMove();
-    void sunMove();
+    void lightParamAjust();
 };
 
 #endif /* MYAPPLICATION_H */

@@ -48,6 +48,14 @@ class Camera {
 
     glm::vec3 getPosition() const { return m_position; }
 
+    float getFov() const { return m_fov; }
+
+    float getAspectRatio() const { return m_aspect; }
+
+    glm::vec3 getFront() const { return m_front; }
+
+    glm::vec3 getUp() const { return m_up; }
+
     void processKeyboard(CameraMovement direction, float deltaTime);
 
     void processMouseMovement(float xoffset, float yoffset,

@@ -1,6 +1,9 @@
 #include <Camera.hpp>
 #include <iostream>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/ext.hpp>
 using namespace std;
+using namespace glm;
 void Camera::updateCameraVectors() {
     glm::vec3 fwd;
     fwd.x = cos(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));
