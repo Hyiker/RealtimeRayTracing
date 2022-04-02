@@ -68,7 +68,7 @@ MyApplication::MyApplication(int width, int height)
     for (int i = 0; i < 2; i++) {
         m_screen_texture[i].init();
         m_screen_texture[i].setup(getFramebufferWidth(), getFramebufferHeight(),
-                                  GL_RGB, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+                                  GL_RGB16F, GL_RGBA, GL_FLOAT, 0);
         m_screen_texture[i].setSizeFilter(GL_LINEAR, GL_LINEAR);
     }
     m_fbo.init();
@@ -102,8 +102,8 @@ void MyApplication::gui() {
 
     // raytracer settings
     ImGui::Separator();
-    ImGui::Text(
-        "Press up/down arrow to adjust SPP, left/right arrow to adjust Max "
+    ImGui::TextUnformatted(
+        "Press up/down arrow to adjust SPP\nLeft/right arrow to adjust Max "
         "Bounce");
     ImGui::SliderInt("Samples per Pixel(SPP) per Frame", &m_light_samples, 1,
                      4);
@@ -131,7 +131,7 @@ void MyApplication::lightParamAjust() {
     if (glfwGetKey(getWindow(), GLFW_KEY_UP) == GLFW_PRESS)
         m_light_samples = std::min(m_light_samples + 1, 4);
     if (glfwGetKey(getWindow(), GLFW_KEY_DOWN) == GLFW_PRESS)
-        m_light_samples = std::max(m_light_samples - 1, 0);
+        m_light_samples = std::max(m_light_samples - 1, 1);
 
     if (glfwGetKey(getWindow(), GLFW_KEY_LEFT) == GLFW_PRESS)
         m_light_bounce = std::max(m_light_bounce - 1, 0);
@@ -188,6 +188,7 @@ void MyApplication::loop() {
     m_final_shader.use();
     m_final_shader.setTexture("uRenderTexture", 0,
                               m_screen_texture[pingpong ^ 1]);
+    m_final_shader.setUniform("uSPP", std::max(1, (int)m_spp));
     m_quad.draw();
     checkError();
     pingpong = pingpong ^ 1;

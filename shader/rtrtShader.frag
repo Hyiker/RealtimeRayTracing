@@ -15,16 +15,20 @@ vec3 dir;
 uniform int uLightBounceCount;
 uniform int uLightSamples;
 
+#define DIFFUSE 1
+#define METALIC 2
+#define GLASS 3
+
 struct Material {
     bool isLight;
     vec3 color;
+    int type;
 };
 
 struct Intersection {
     Material material;
     vec3 position;
     vec3 normal;
-    vec3 wi, wo;
 };
 
 struct Sphere {
@@ -38,7 +42,7 @@ struct AreaLight {
     float r;
     Material material;
 };
-#define EPS 1e-5
+#define EPS 1e-3
 #define PI 3.14159265359
 float hasIntersectWithAreaLight(in vec3 origin, in vec3 dir, in AreaLight al,
                                 inout Intersection inter) {
@@ -53,7 +57,6 @@ float hasIntersectWithAreaLight(in vec3 origin, in vec3 dir, in AreaLight al,
     inter.position = coord;
     inter.normal = vec3(0, dir.y > 0.0 ? -1.0 : 1.0, 0);
     inter.material = al.material;
-    inter.wi = normalize(dir);
     return t;
 }
 
@@ -70,25 +73,32 @@ float hasIntersectWithSphere(in vec3 origin, in vec3 dir, in Sphere sphere,
         float t1 = (-b - sqrt(discriminate)) / (2.0 * a);
         float t2 = (-b + sqrt(discriminate)) / (2.0 * a);
         inter.material = sphere.material;
-        float t = t1 > 0.0 ? t1 : t2;
+        // use t1 > EPS to prevent "startup" collision
+        float t = t1 >= EPS ? t1 : t2;
         if (t < 0.0) return -1.0;
         inter.position = origin + dir * t;
         inter.normal = normalize(inter.position - sphere.o);
-        inter.wi = normalize(dir);
         return t;
     }
 }
 
-#define N_GEOMS 3
+#define N_GEOMS 5
 // microfacet material
-Material mfWhite = Material(false, vec3(1.0));
-Material mfGreen = Material(false, vec3(RGB_DIV255(11, 119, 199)));
+Material mfWhite = Material(false, vec3(10.0), DIFFUSE);
+Material mfGreen = Material(false, vec3(0.1, 0.6, 0.03), DIFFUSE);
+// metalic white
+Material metalicWhite = Material(false, vec3(1.0), METALIC);
+// glass
+Material glassWhite = Material(false, vec3(1.0), GLASS);
+Material mfBlue = Material(false, vec3(RGB_DIV255(11, 119, 199)), DIFFUSE);
 // light material
-Material lWhite = Material(true, vec3(1.0));
+Material lWhite = Material(true, vec3(30.0), DIFFUSE);
 
 // geometry primitives
-Sphere sp1 = Sphere(vec3(0, 0, -1), 0.5, mfWhite);
-Sphere sp2 = Sphere(vec3(0.0, -100.5, -1.0), 100.0, mfGreen);
+Sphere sp1 = Sphere(vec3(0, 0, -1), 0.5, mfGreen);
+Sphere sp3 = Sphere(vec3(-1.5, 0, -0.5), 0.5, metalicWhite);
+Sphere sp4 = Sphere(vec3(-0.6, 0, 1.5), 0.5, glassWhite);
+Sphere sp2 = Sphere(vec3(0.0, -1000.5, -1.0), 1000.0, mfBlue);
 AreaLight light = AreaLight(2.0, 0.25, lWhite);
 bool hasIntersect(in vec3 origin, in vec3 dir,
                   inout Intersection intersection) {
@@ -97,6 +107,8 @@ bool hasIntersect(in vec3 origin, in vec3 dir,
     t[0] = hasIntersectWithSphere(origin, dir, sp1, inter[0]);
     t[1] = hasIntersectWithSphere(origin, dir, sp2, inter[1]);
     t[2] = hasIntersectWithAreaLight(origin, dir, light, inter[2]);
+    t[3] = hasIntersectWithSphere(origin, dir, sp3, inter[3]);
+    t[4] = hasIntersectWithSphere(origin, dir, sp4, inter[4]);
     float t_min = -1.0;
     bool has_inter = false;
     for (int i = 0; i < N_GEOMS; i++) {
@@ -113,6 +125,11 @@ bool hasIntersect(in vec3 origin, in vec3 dir,
 uniform vec3 uRand3;
 float random(vec2 st) {
     return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+}
+vec2 random2(vec2 p) {
+    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+
+    return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
 }
 vec3 random3(vec3 p) {
     p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
@@ -138,11 +155,16 @@ vec3 randomHemispherePoint(vec3 rand, vec3 n) {
     vec3 v = randomSpherePoint(rand);
     return v * sign(dot(v, n));
 }
+float fresnelApprox(float cosThetaI, float n1, float n2) {
+    float r0 = (n1 - n2) / (n1 + n2);
+    r0 *= r0;
+    return r0 + (1.0 - r0) * pow(1.0 - cosThetaI, 5.0);
+}
 vec3 randSeed;
 vec3 recursivePathTracing(vec3 origin, vec3 dir) {
     vec3 rayColor = vec3(0.0);
     vec3 rayBrightness = vec3(1.0);
-    float p_RR = 0.95;
+    float p_RR = 0.8;
 
     for (int i = 0; i < uLightBounceCount; i++) {
         if (random(randSeed.xy) > p_RR) break;
@@ -156,9 +178,33 @@ vec3 recursivePathTracing(vec3 origin, vec3 dir) {
             break;
         } else {
             rayBrightness *= material.color / p_RR;
-            origin = inter.position;
-            vec3 rs = random3(randSeed);
-            dir = normalize(randomHemispherePoint(rs, inter.normal));
+            // add a slight offset from hit position to prevent artifacts
+            // https://computergraphics.stackexchange.com/questions/7789/weird-artifacts-in-my-ray-tracer
+            origin = inter.position + inter.normal * EPS;
+            vec3 rs = normalize(random3(randSeed));
+            if (material.type == DIFFUSE) {
+                dir = normalize(randomHemispherePoint(rs, inter.normal));
+            } else if (material.type == METALIC) {
+                dir = reflect(dir, inter.normal);
+            } else if (material.type == GLASS) {
+                float si = dot(dir, inter.normal);
+                float eta = 0.66;
+                if (si < 0.0) {
+                    float rd = random(randSeed.xy) + 1.0;
+                    rd /= 2.0;
+                    // incident
+                    if (rd <= fresnelApprox(normalize(dot(-dir, inter.normal)),
+                                            1.0, 1 / eta)) {
+                        dir = reflect(dir, inter.normal);
+                    } else {
+                        dir = refract(dir, inter.normal, eta);
+                        origin = inter.position - inter.normal * EPS;
+                    }
+                } else {
+                    // exitent
+                    dir = refract(dir, -inter.normal, 1 / eta);
+                }
+            }
             randSeed = rs;
         }
     }
@@ -170,16 +216,16 @@ flat in vec3 vVerticalRange;
 uniform int uPingpong;
 uniform sampler2D uLastFrame;
 void main() {
-    randSeed = vec3(texCoord, 2.3) + uRand3;
     origin = rayOrigin;
     vec3 res = vec3(0.0);
-    // vec2 uvRand = random2(texCoord) * 2.0 - vec2(1.0);
+    vec2 uvRand = random2(texCoord * uRand3.xy);
     dir = normalize(rayDir);
+    randSeed = normalize(vec3(dir) + uRand3.x * vHorizontalRange +
+                         uRand3.y * vVerticalRange);
     for (int i = 0; i < uLightSamples; i++) {
         res += recursivePathTracing(origin, dir);
-        // uvRand = random2(uvRand) * 2.0 - vec2(1.0);
+        uvRand = random2(uvRand);
     }
-    // res = pow(res, vec3(1 / 2.2));
     res += texture(uLastFrame, texCoord).rgb;
     if (uPingpong == 0) {
         oColor0 = vec4(res, 1.0);
