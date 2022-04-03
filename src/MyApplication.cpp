@@ -183,8 +183,8 @@ void MyApplication::loop() {
 
     m_fbo.unbind();
     glDisable(GL_DEPTH_TEST);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glClearColor(GL_RGBA_BLACK);
+    // glClear(GL_COLOR_BUFFER_BIT);
+    // glClearColor(GL_RGBA_BLACK);
     m_final_shader.use();
     m_final_shader.setTexture("uRenderTexture", 0,
                               m_screen_texture[pingpong ^ 1]);

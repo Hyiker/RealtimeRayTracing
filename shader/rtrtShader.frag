@@ -92,7 +92,7 @@ Material metalicWhite = Material(false, vec3(1.0), METALIC);
 Material glassWhite = Material(false, vec3(1.0), GLASS);
 Material mfBlue = Material(false, vec3(RGB_DIV255(11, 119, 199)), DIFFUSE);
 // light material
-Material lWhite = Material(true, vec3(30.0), DIFFUSE);
+Material lWhite = Material(true, vec3(100.0), DIFFUSE);
 
 // geometry primitives
 Sphere sp1 = Sphere(vec3(0, 0, -1), 0.5, mfGreen);
@@ -177,15 +177,19 @@ vec3 recursivePathTracing(vec3 origin, vec3 dir) {
             rayColor = material.color * rayBrightness;
             break;
         } else {
-            rayBrightness *= material.color / p_RR;
+            float cosine = 1.0;
+            float pdf = 1.0;
             // add a slight offset from hit position to prevent artifacts
             // https://computergraphics.stackexchange.com/questions/7789/weird-artifacts-in-my-ray-tracer
             origin = inter.position + inter.normal * EPS;
             vec3 rs = normalize(random3(randSeed));
             if (material.type == DIFFUSE) {
                 dir = normalize(randomHemispherePoint(rs, inter.normal));
+                pdf = 2.0 * PI;
+                cosine = dot(dir, inter.normal);
             } else if (material.type == METALIC) {
                 dir = reflect(dir, inter.normal);
+                cosine = dot(dir, inter.normal);
             } else if (material.type == GLASS) {
                 float si = dot(dir, inter.normal);
                 float eta = 0.66;
@@ -196,15 +200,20 @@ vec3 recursivePathTracing(vec3 origin, vec3 dir) {
                     if (rd <= fresnelApprox(normalize(dot(-dir, inter.normal)),
                                             1.0, 1 / eta)) {
                         dir = reflect(dir, inter.normal);
+                        cosine = dot(dir, inter.normal);
                     } else {
                         dir = refract(dir, inter.normal, eta);
                         origin = inter.position - inter.normal * EPS;
+                        cosine = dot(dir, -inter.normal);
                     }
                 } else {
                     // exitent
                     dir = refract(dir, -inter.normal, 1 / eta);
+                    cosine = abs(dot(dir, inter.normal));
                 }
             }
+            cosine = max(cosine, 0.0);
+            rayBrightness *= material.color * cosine / p_RR / pdf;
             randSeed = rs;
         }
     }
@@ -218,12 +227,12 @@ uniform sampler2D uLastFrame;
 void main() {
     origin = rayOrigin;
     vec3 res = vec3(0.0);
-    vec2 uvRand = random2(texCoord * uRand3.xy);
+    vec2 uvRand = random2(texCoord + uRand3.xy);
     dir = normalize(rayDir);
-    randSeed = normalize(vec3(dir) + uRand3.x * vHorizontalRange +
-                         uRand3.y * vVerticalRange);
+    randSeed = normalize(vec3(dir) + uRand3);
     for (int i = 0; i < uLightSamples; i++) {
-        res += recursivePathTracing(origin, dir);
+        res += recursivePathTracing(origin, dir + uvRand.x * vHorizontalRange +
+                                                uvRand.y * vVerticalRange);
         uvRand = random2(uvRand);
     }
     res += texture(uLastFrame, texCoord).rgb;
