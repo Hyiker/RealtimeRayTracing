@@ -9,6 +9,7 @@
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
+#include <imgui_impl_glfw.h>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/random.hpp>
@@ -28,6 +29,7 @@ using namespace std;
 using namespace glm;
 
 static void mouseCallback(GLFWwindow *window, double xposIn, double yposIn) {
+    ImGui_ImplGlfw_CursorPosCallback(window, xposIn, yposIn);
     static bool firstMouse = true;
     if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_RELEASE) {
         firstMouse = true;
@@ -105,9 +107,8 @@ void MyApplication::gui() {
     ImGui::TextUnformatted(
         "Press up/down arrow to adjust SPP\nLeft/right arrow to adjust Max "
         "Bounce");
-    ImGui::SliderInt("Samples per Pixel(SPP) per Frame", &m_light_samples, 1,
-                     4);
-    ImGui::SliderInt("Light Bounce", &m_light_bounce, 0, 200);
+    ImGui::SliderInt("SPP", &m_light_samples, 1, 4);
+    ImGui::SliderInt("Max Bounce", &m_light_bounce, 0, 200);
     ImGui::Text("Current SPP: %lld", m_spp);
 
     ImGui::End();
@@ -176,8 +177,8 @@ void MyApplication::loop() {
                                                       getFramebufferHeight()));
     m_rtrt_shader.setTexture("uLastFrame", 0, m_screen_texture[pingpong]);
     m_rtrt_shader.setUniform("uPingpong", pingpong ^ 1);
-
-    m_rtrt_shader.setUniform("uRand3", randomVec3());
+    auto rand = randomVec3();
+    m_rtrt_shader.setUniform("uRand3", rand);
     m_spp += m_light_samples;
     m_quad.draw();
 

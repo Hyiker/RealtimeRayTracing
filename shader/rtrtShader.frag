@@ -92,7 +92,7 @@ Material metalicWhite = Material(false, vec3(1.0), METALIC);
 Material glassWhite = Material(false, vec3(1.0), GLASS);
 Material mfBlue = Material(false, vec3(RGB_DIV255(11, 119, 199)), DIFFUSE);
 // light material
-Material lWhite = Material(true, vec3(100.0), DIFFUSE);
+Material lWhite = Material(true, vec3(10.0), DIFFUSE);
 
 // geometry primitives
 Sphere sp1 = Sphere(vec3(0, 0, -1), 0.5, mfGreen);
@@ -121,50 +121,78 @@ bool hasIntersect(in vec3 origin, in vec3 dir,
     return t_min > 0.0;
 }
 
-#define LIGHT_BOUNCE_MAX 30
 uniform vec3 uRand3;
 float random(vec2 st) {
     return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
 }
 vec2 random2(vec2 p) {
-    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+    p = vec2(random(p), random(p * uRand3.xy * 100.0));
 
-    return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+    return -1.0 + 2.0 * p;
 }
 vec3 random3(vec3 p) {
     p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
              dot(p, vec3(269.5, 183.3, 246.1)),
              dot(p, vec3(113.5, 271.9, 124.6)));
 
-    return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+    return -1.0 + 2.0 * fract(sin(p * 10.5453123) * 43758.5453123);
 }
 
-vec3 randomSpherePoint(vec3 rand) {
-    float ang1 = (rand.x + 1.0) * PI;  // [-1..1) -> [0..2*PI)
-    float u = rand.y;  // [-1..1), cos and acos(2v-1) cancel each other out, so
-                       // we arrive at [-1..1)
-    float u2 = u * u;
-    float sqrt1MinusU2 = sqrt(1.0 - u2);
-    float x = sqrt1MinusU2 * cos(ang1);
-    float y = sqrt1MinusU2 * sin(ang1);
-    float z = u;
+// modified from
+// https://github.com/LWJGL/lwjgl3-demos/blob/main/res/org/lwjgl/demo/opengl/raytracing/randomCommon.glsl
+
+vec3 sampleSphereUniform(vec3 rand) {
+    float phi = (rand.x + 1.0) * PI;  // [-1..1) -> [0..2*PI)
+
+    // inverse transform sampling
+    float theta = acos(rand.y);
+    float x = cos(phi) * sin(theta);
+    float z = sin(phi) * sin(theta);
+    float y = cos(theta);
     return vec3(x, y, z);
 }
+#define INV_2_PI 0.15915494
+#define INV_PI 0.31830989
+vec3 sampleHemisphereUniform(vec3 rand, vec3 n, out float pdf) {
+    vec3 ph = sampleSphereUniform(rand);
+    ph.z = abs(ph.z);
+    pdf = INV_2_PI;
 
-vec3 randomHemispherePoint(vec3 rand, vec3 n) {
-    vec3 v = randomSpherePoint(rand);
-    return v * sign(dot(v, n));
+    vec3 tangent = normalize(rand);
+    vec3 bitangent = normalize(cross(tangent, n));
+    tangent = normalize(cross(bitangent, n));
+    mat3 TBN = mat3(tangent, bitangent, n);
+    vec3 dir = normalize(TBN * ph);
+
+    return dir;
 }
+
+vec3 sampleHemisphereCosine(vec3 seed, vec3 n, out float pdf) {
+    vec3 ss = vec3(0.0, 0.0, 1.0) + sampleSphereUniform(seed);
+    float z = sqrt(1 - ss.x * ss.x - ss.y * ss.y);
+    vec3 ph = vec3(ss.x, ss.y, z);
+
+    vec3 tangent = normalize(seed);
+    vec3 bitangent = normalize(cross(tangent, n));
+    tangent = normalize(cross(bitangent, n));
+    mat3 TBN = mat3(tangent, bitangent, n);
+    vec3 dir = normalize(TBN * ph);
+
+    pdf = z * INV_PI;
+    return dir;
+}
+
 float fresnelApprox(float cosThetaI, float n1, float n2) {
     float r0 = (n1 - n2) / (n1 + n2);
     r0 *= r0;
     return r0 + (1.0 - r0) * pow(1.0 - cosThetaI, 5.0);
 }
+
 vec3 randSeed;
 vec3 recursivePathTracing(vec3 origin, vec3 dir) {
     vec3 rayColor = vec3(0.0);
     vec3 rayBrightness = vec3(1.0);
-    float p_RR = 0.8;
+    float p_RR = 0.9;
 
     for (int i = 0; i < uLightBounceCount; i++) {
         if (random(randSeed.xy) > p_RR) break;
@@ -179,13 +207,15 @@ vec3 recursivePathTracing(vec3 origin, vec3 dir) {
         } else {
             float cosine = 1.0;
             float pdf = 1.0;
+            vec3 brdf = material.color;
             // add a slight offset from hit position to prevent artifacts
             // https://computergraphics.stackexchange.com/questions/7789/weird-artifacts-in-my-ray-tracer
             origin = inter.position + inter.normal * EPS;
-            vec3 rs = normalize(random3(randSeed));
+            randSeed = random3(randSeed);
             if (material.type == DIFFUSE) {
-                dir = normalize(randomHemispherePoint(rs, inter.normal));
-                pdf = 2.0 * PI;
+                brdf *= INV_PI;
+                dir = normalize(sampleHemisphereCosine(
+                    randSeed, normalize(inter.normal), pdf));
                 cosine = dot(dir, inter.normal);
             } else if (material.type == METALIC) {
                 dir = reflect(dir, inter.normal);
@@ -212,9 +242,9 @@ vec3 recursivePathTracing(vec3 origin, vec3 dir) {
                     cosine = abs(dot(dir, inter.normal));
                 }
             }
-            cosine = max(cosine, 0.0);
-            rayBrightness *= material.color * cosine / p_RR / pdf;
-            randSeed = rs;
+            cosine = max(cosine, 1e-5);
+            pdf = max(pdf, 1e-5);
+            rayBrightness *= brdf * cosine / p_RR / pdf;
         }
     }
     return rayColor;
@@ -229,8 +259,8 @@ void main() {
     vec3 res = vec3(0.0);
     vec2 uvRand = random2(texCoord + uRand3.xy);
     dir = normalize(rayDir);
-    randSeed = normalize(vec3(dir) + uRand3);
     for (int i = 0; i < uLightSamples; i++) {
+        randSeed = random3(vec3(texCoord + uRand3.xy, uRand3.z * dir.z + i));
         res += recursivePathTracing(origin, dir + uvRand.x * vHorizontalRange +
                                                 uvRand.y * vVerticalRange);
         uvRand = random2(uvRand);
