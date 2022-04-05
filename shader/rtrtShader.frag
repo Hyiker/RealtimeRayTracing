@@ -135,7 +135,7 @@ vec3 random3(vec3 p) {
              dot(p, vec3(269.5, 183.3, 246.1)),
              dot(p, vec3(113.5, 271.9, 124.6)));
 
-    return -1.0 + 2.0 * fract(sin(p * 10.5453123) * 43758.5453123);
+    return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
 }
 
 // modified from
